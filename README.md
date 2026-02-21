@@ -1,4 +1,4 @@
-# 🔥 PyroWatch AI — Wildfire Early Warning System
+# PyroWatch AI — Wildfire Early Warning System
 **EnviroCast GEO Hackathon | "From Insight to Impact"**
 
 ## Quick Start (Phase 1 Setup — run these in order)
@@ -12,9 +12,9 @@ cd pyrowatch
 ```bash
 cd backend
 python -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
+source venv/bin/activate          
 pip install -r requirements.txt
-cp ../.env.example .env           # then fill in your API keys
+cp ../.env  
 ```
 
 ### 3. Frontend setup
@@ -26,21 +26,19 @@ npm install
 ### 4. Download Phase 1 data
 ```bash
 cd ..
-python scripts/fetch_data.py      # pulls NASA FIRMS + NOAA data
-python scripts/build_dataset.py   # merges into clean DataFrame
+python scripts/fetch_data.py      
+python scripts/build_dataset.py  
 ```
 
 ### 5. Verify Phase 1 gate
 ```bash
-python scripts/verify_phase1.py   # must print ✅ PASS on all checks
+python scripts/verify_phase1.py   
 ```
 
 ### 6. Run dev servers
 ```bash
-# Terminal 1 — Backend
 cd backend && uvicorn api.main:app --reload --port 8000
 
-# Terminal 2 — Frontend
 cd frontend && npm run dev
 ```
 
