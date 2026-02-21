@@ -23,17 +23,6 @@ cd ../frontend
 npm install
 ```
 
-### 4. Download Phase 1 data
-```bash
-cd ..
-python scripts/fetch_data.py      
-python scripts/build_dataset.py  
-```
-
-### 5. Verify Phase 1 gate
-```bash
-python scripts/verify_phase1.py   
-```
 
 ### 6. Run dev servers
 ```bash
