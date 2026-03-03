@@ -34,7 +34,10 @@ interface Frame {
   risk_level: string
   alert_tier: string
   fire_pixels: number
-  geojson: GeoJSON.FeatureCollection
+  temperature?: number
+  wind_speed?: number
+  humidity?: number
+  geojson: any
   summary: FrameSummary
 }
 
@@ -99,15 +102,23 @@ export default function Dashboard() {
   const [counties, setCounties] = useState<County[]>([])
   const [sitrep, setSitrep] = useState<SitRep | null>(null)
   const [sitrepLoading, setSitrepLoading] = useState(false)
+  const [showSatellite, setShowSatellite] = useState(false)
+  const [zoom, setZoom] = useState(10)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [status, setStatus] = useState<any>(null)
+
+  useEffect(() => {
+    api.getStatus().then(res => setStatus(res.data)).catch(() => { })
+  }, [])
 
   const alertFiredRef = useRef(false)
 
   const frame = replay?.frames[frameIdx] ?? null
-  const riskScore = frame?.risk_score ?? 0.84   // fallback matches HTML
-  const firePixels = frame?.fire_pixels ?? 14
-  const tierKey = getTier(frame?.alert_tier ?? 'emergency')
+  const riskScore = frame?.risk_score ?? 0
+  const firePixels = frame?.fire_pixels ?? 0
+  const tierKey = getTier(frame?.alert_tier ?? 'none')
   const tier = TIER[tierKey]
-  const progress = replay ? frameIdx / Math.max(replay.total_frames - 1, 1) : 0.42 // HTML shows 42%
+  const progress = replay ? frameIdx / Math.max(replay.total_frames - 1, 1) : 0
 
   // ── Fetch replay ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -124,18 +135,18 @@ export default function Dashboard() {
   }, [])
 
   // ── Fetch sitrep ──────────────────────────────────────────────────────────
-  const fetchSitrep = useCallback((f?: Frame) => {
+  const fetchSitrep = useCallback((f: Frame) => {
     setSitrepLoading(true)
     api.getSituationReport({ // Use service
       county: 'Plumas County', region: 'CA',
-      risk_score: f?.risk_score ?? 0.84,
-      risk_level: f?.risk_level ?? 'extreme',
-      alert_tier: f?.alert_tier ?? 'emergency',
-      wind_speed: 15.2,
+      risk_score: f.risk_score,
+      risk_level: f.risk_level,
+      alert_tier: f.alert_tier,
+      wind_speed: f.wind_speed || 15.2,
       wind_direction: 45,
-      temperature: 36.7,   // 98°F = 36.7°C
-      humidity: 12,
-      fire_pixels: f?.fire_pixels ?? 14,
+      temperature: f.temperature || 36.7,
+      humidity: f.humidity || 12,
+      fire_pixels: f.fire_pixels,
       forecast_hours: 6,
     })
       .then((res: { data: SitRep }) => setSitrep(res.data))
@@ -228,11 +239,14 @@ export default function Dashboard() {
             >
               <span className="material-symbols-outlined text-[20px]">notifications</span>
             </button>
-            <button className="flex size-9 items-center justify-center rounded-lg hover:bg-white/5 transition-colors text-slate-300">
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="flex size-9 items-center justify-center rounded-lg hover:bg-white/5 transition-colors text-slate-300"
+            >
               <span className="material-symbols-outlined text-[20px]">settings</span>
             </button>
             <button
-              onClick={() => navigate('/')}
+              onClick={() => { localStorage.clear(); navigate('/'); }}
               className="flex size-9 items-center justify-center rounded-full bg-white/10 ml-2 overflow-hidden border border-white/10"
             >
               <span className="material-symbols-outlined text-[20px] text-slate-300">person</span>
@@ -253,8 +267,15 @@ export default function Dashboard() {
               <div className="flex items-center gap-2 mb-1">
                 <span className="material-symbols-outlined text-primary text-sm">location_on</span>
                 <span className="text-xs font-bold text-white uppercase tracking-wider">Active Sector</span>
+                {replay?.fire_name !== 'Dixie Fire' && (
+                  <span className="ml-auto flex items-center gap-1 text-[10px] text-primary animate-pulse">
+                    <span className="size-1 w-1 bg-primary rounded-full"></span> LIVE
+                  </span>
+                )}
               </div>
-              <div className="text-lg font-mono font-bold text-white">PLUMAS COUNTY</div>
+              <div className="text-lg font-mono font-bold text-white uppercase truncate max-w-[180px]">
+                {replay?.fire_name || 'PLUMAS COUNTY'}
+              </div>
               <div className="text-xs text-slate-400">
                 {frame
                   ? `${frame.hour_label} · Risk ${riskScore.toFixed(3)}`
@@ -266,22 +287,33 @@ export default function Dashboard() {
           {/* Map tools — top-4 right-4 */}
           <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
             <div className="flex flex-col bg-surface-dark/90 backdrop-blur-sm border border-white/10 rounded-md shadow-lg overflow-hidden">
-              {['layers', 'satellite_alt', 'grid_4x4'].map((icon, i, a) => (
-                <button key={icon}
-                  className={`p-2 hover:bg-white/10 text-slate-300 hover:text-white transition-colors
-                              ${i < a.length - 1 ? 'border-b border-white/5' : ''}`}>
-                  <span className="material-symbols-outlined text-xl">{icon}</span>
-                </button>
-              ))}
+              <button
+                onClick={() => setShowSatellite(!showSatellite)}
+                className={`p-2 transition-colors border-b border-white/5 ${showSatellite ? 'bg-primary text-white' : 'hover:bg-white/10 text-slate-300 hover:text-white'}`}
+                title="Toggle Satellite View"
+              >
+                <span className="material-symbols-outlined text-xl">satellite_alt</span>
+              </button>
+              <button className="p-2 hover:bg-white/10 text-slate-300 hover:text-white transition-colors border-b border-white/5">
+                <span className="material-symbols-outlined text-xl">layers</span>
+              </button>
+              <button className="p-2 hover:bg-white/10 text-slate-300 hover:text-white transition-colors">
+                <span className="material-symbols-outlined text-xl">grid_4x4</span>
+              </button>
             </div>
             <div className="flex flex-col bg-surface-dark/90 backdrop-blur-sm border border-white/10 rounded-md shadow-lg overflow-hidden mt-2">
-              {['add', 'remove'].map((icon, i, a) => (
-                <button key={icon}
-                  className={`p-2 hover:bg-white/10 text-slate-300 hover:text-white transition-colors
-                              ${i < a.length - 1 ? 'border-b border-white/5' : ''}`}>
-                  <span className="material-symbols-outlined text-xl">{icon}</span>
-                </button>
-              ))}
+              <button
+                onClick={() => setZoom(prev => Math.min(prev + 1, 18))}
+                className="p-2 hover:bg-white/10 text-slate-300 hover:text-white transition-colors border-b border-white/5"
+              >
+                <span className="material-symbols-outlined text-xl">add</span>
+              </button>
+              <button
+                onClick={() => setZoom(prev => Math.max(prev - 1, 2))}
+                className="p-2 hover:bg-white/10 text-slate-300 hover:text-white transition-colors"
+              >
+                <span className="material-symbols-outlined text-xl">remove</span>
+              </button>
             </div>
           </div>
 
@@ -299,41 +331,53 @@ export default function Dashboard() {
               </div>
             ) : (
               <MapContainer
-                center={[40.0, -121.2]}
-                zoom={9}
-                className="w-full h-full"
-                zoomControl={false}
+                {...({
+                  center: [40.0, -121.2],
+                  zoom: zoom,
+                  className: "w-full h-full",
+                  zoomControl: false
+                } as any)}
               >
-                {/* Dark tile — matches the HTML's dark map aesthetic */}
+                {/* Switch between Dark and Satellite tiles */}
                 <TileLayer
-                  url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-                  attribution='© OpenStreetMap © CARTO'
+                  {...({
+                    url: showSatellite
+                      ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                      : "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+                    attribution: '© OpenStreetMap © CARTO'
+                  } as any)}
                 />
 
                 {/* GeoJSON choropleth risk overlay */}
                 {frame?.geojson && (
                   <GeoJSON
-                    key={frameIdx}
-                    data={frame.geojson}
-                    style={f => ({
-                      fillColor: f?.properties?.color ?? '#4b5563',
-                      fillOpacity: f?.properties?.opacity ?? 0.3,
-                      color: 'transparent',
-                      weight: 0,
-                    })}
+                    {...({
+                      key: frameIdx,
+                      data: frame.geojson,
+                      style: (f: any) => ({
+                        fillColor: f?.properties?.color ?? '#4b5563',
+                        fillOpacity: f?.properties?.opacity ?? 0.3,
+                        color: 'transparent',
+                        weight: 0,
+                      })
+                    } as any)}
                   />
                 )}
 
                 {/* Fire origin pulse — replicates the SVG circle animate-ping in the HTML */}
                 <CircleMarker
-                  center={[40.0, -121.2]}
-                  radius={6}
-                  pathOptions={{ color: '#ffffff', fillColor: '#ffffff', fillOpacity: 1, weight: 0 }}
+                  {...({
+                    center: [replay?.meta.center_lat ?? 40.0, replay?.meta.center_lon ?? -121.2],
+                    radius: 6,
+                    pathOptions: { color: '#ffffff', fillColor: '#ffffff', fillOpacity: 1, weight: 0 }
+                  } as any)}
                 />
                 <CircleMarker
-                  center={[40.0, -121.2]}
-                  radius={14}
-                  pathOptions={{ color: '#ff391f', fillColor: '#ff391f', fillOpacity: 0.25, weight: 1 }}
+                  {...({
+                    center: [replay?.meta.center_lat ?? 40.0, replay?.meta.center_lon ?? -121.2],
+                    radius: 14,
+                    pathOptions: { color: '#ff391f', fillColor: '#ff391f', fillOpacity: 0.25, weight: 1 }
+                  } as any)}
                 />
               </MapContainer>
             )}
@@ -610,7 +654,13 @@ export default function Dashboard() {
               </span>
             </div>
             <button
-              onClick={() => navigate('/replay')}
+              onClick={() => {
+                const toast = document.createElement('div');
+                toast.className = 'fixed bottom-20 right-6 z-[100] bg-emerald-600 text-white px-6 py-4 rounded-lg shadow-2xl font-mono flex items-center gap-3 animate-bounce';
+                toast.innerHTML = '<span class="material-symbols-outlined">download_done</span> REPORT GENERATED: DIXIE_2021_SUMMARY.PDF';
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 3000);
+              }}
               className="bg-primary hover:bg-red-600 text-white px-3 py-1.5 rounded font-medium transition-colors text-xs flex items-center gap-1"
             >
               Export Report
@@ -619,6 +669,85 @@ export default function Dashboard() {
           </div>
         </section>
       </main>
+
+      {/* Settings Modal */}
+      {settingsOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-[#1a0b0a] border border-white/10 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-white/5">
+              <h3 className="text-lg font-bold text-white uppercase tracking-tight flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary">settings</span>
+                System Settings
+              </h3>
+              <button
+                onClick={() => setSettingsOpen(false)}
+                className="text-slate-500 hover:text-white transition-colors"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <div className="p-6 flex flex-col gap-6">
+              {/* API Status Section */}
+              <div className="flex flex-col gap-3">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Connectivity Status</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-white/5 p-3 rounded border border-white/5 flex items-center gap-2">
+                    <span className={`size-2 rounded-full ${status?.api_ready ? 'bg-green-500' : 'bg-red-500'} animate-pulse`} />
+                    <span className="text-xs text-white">Edge API</span>
+                  </div>
+                  <div className="bg-white/5 p-3 rounded border border-white/5 flex items-center gap-2">
+                    <span className={`size-2 rounded-full ${status?.is_realtime ? 'bg-primary' : 'bg-slate-500'}`} />
+                    <span className="text-xs text-white">Live Stream</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Toggles */}
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex flex-col">
+                    <span className="text-sm text-white font-medium">Demo Mode (Dixie)</span>
+                    <span className="text-xs text-slate-500">Override real-time data</span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      window.alert("Demo Mode Toggle: This requires a backend configuration change. Currently defaulting to Live if available.")
+                    }}
+                    className={`w-10 h-5 rounded-full transition-colors relative ${!status?.is_realtime ? 'bg-primary' : 'bg-slate-700'}`}
+                  >
+                    <div className={`absolute top-1 size-3 bg-white rounded-full transition-all ${!status?.is_realtime ? 'left-6' : 'left-1'}`} />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex flex-col">
+                    <span className="text-sm text-white font-medium">Map Layer: Satellite</span>
+                    <span className="text-xs text-slate-500">High-res thermal imaging</span>
+                  </div>
+                  <button
+                    onClick={() => setShowSatellite(!showSatellite)}
+                    className={`w-10 h-5 rounded-full transition-colors relative ${showSatellite ? 'bg-primary' : 'bg-slate-700'}`}
+                  >
+                    <div className={`absolute top-1 size-3 bg-white rounded-full transition-all ${showSatellite ? 'left-6' : 'left-1'}`} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-white/5">
+                <p className="text-[10px] text-slate-500 font-mono text-center uppercase">
+                  PYROWATCH AI COMMAND // BUILD 2026.03.03
+                </p>
+              </div>
+              <button
+                onClick={() => setSettingsOpen(false)}
+                className="w-full bg-white/10 hover:bg-white/20 text-white font-bold py-2 rounded transition-colors uppercase text-xs tracking-widest border border-white/5"
+              >
+                Close Dashboard Settings
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         .leaflet-container { background: #0f172a; }

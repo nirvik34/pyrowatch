@@ -123,7 +123,7 @@ export default function Landing() {
                 </button>
 
                 <a
-                  href="http://localhost:8000/docs"
+                  href="/docs"
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-center justify-center gap-2 bg-surface-dark border border-surface-border

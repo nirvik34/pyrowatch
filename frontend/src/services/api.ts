@@ -27,6 +27,7 @@ if (import.meta.env.DEV) {
 
 
 export const ping = () => client.get('/health')
+export const getStatus = () => client.get('/status')
 
 
 export const getRiskMap = (region: string, date: string) =>
@@ -47,3 +48,7 @@ export const getReplayFrames = (fireId: string) =>
 
 export const getAlerts = (region: string) =>
   client.get('/alerts', { params: { region } })
+
+
+export const getAlertHistory = () =>
+  client.get('/alert-history')

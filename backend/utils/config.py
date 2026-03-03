@@ -104,3 +104,14 @@ def validate_keys():
     else:
         print("✅ All API keys loaded.")
     return len(missing) == 0
+def get_active_incident() -> dict:
+    """Returns the current real-time fire if available, else falls back to DEMO_FIRE."""
+    try:
+        from data.firms_loader import get_active_fire
+        active = get_active_fire(region="CA")
+        if active:
+            return active
+    except Exception as e:
+        print(f"Error fetching active fire: {e}")
+        
+    return DEMO_FIRE

@@ -1,5 +1,4 @@
 
-
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -9,7 +8,7 @@ from pydantic import BaseModel
 import numpy as np
 import pandas as pd
 
-from utils.config import validate_keys, APP_ENV, DEMO_FIRE, LSTM_CONFIG
+from utils.config import validate_keys, APP_ENV, DEMO_FIRE, LSTM_CONFIG, get_active_incident
 from utils.logger import logger
 
 app = FastAPI(
@@ -72,10 +71,12 @@ async def health():
 async def status():
     from utils.config import PROCESSED_DIR
     from ml.inference import get_model_info
+    incident = get_active_incident()
     return {
         "dataset_ready": (PROCESSED_DIR / "dataset.csv").exists(),
         "model_info":    get_model_info(),
-        "demo_fire":     DEMO_FIRE["name"],
+        "demo_fire":     incident["name"],
+        "is_realtime":   incident["name"] != "Dixie Fire",
         "api_ready":     True,
     }
 
@@ -93,22 +94,28 @@ async def risk_map(
     grid_step: float = Query(default=0.08,         description="Grid resolution in degrees"),
 ):
     try:
+        incident = get_active_incident()
         df = _get_dataset()
         df = df.copy()
-        df["date_str"] = pd.to_datetime(df["timestamp"]).dt.strftime("%Y-%m-%d")
-        day_df = df[df["date_str"] <= date].tail(24)
+        
+        if incident["name"] == "Dixie Fire":
+            df["date_str"] = pd.to_datetime(df["timestamp"]).dt.strftime("%Y-%m-%d")
+            day_df = df[df["date_str"] <= date].tail(24)
+        else:
+            day_df = df.tail(24)
+            
         if len(day_df) == 0:
             day_df = df.tail(24)
 
         from api.geo import build_risk_geojson, _get_alert_tier, _classify_risk
-        geojson = build_risk_geojson(day_df, grid_step=grid_step)
+        geojson = build_risk_geojson(day_df, grid_step=grid_step, bbox=incident["bbox"])
         risks   = [f["properties"]["risk_score"] for f in geojson["features"]]
         max_risk = max(risks) if risks else 0
         alert    = _get_alert_tier(max_risk)
         level, _ = _classify_risk(max_risk)
 
         return {
-            "date": date, "region": region,
+            "date": date, "region": region, "incident": incident["name"],
             "n_cells": len(geojson["features"]),
             "max_risk": round(max_risk, 4),
             "risk_level": level, "alert_tier": alert,
@@ -166,6 +173,9 @@ async def replay(
     fire_id:  str = Query(default="dixie_2021"),
     n_frames: int = Query(default=48),
 ):
+    # For demo, keeping replay locked to Dixie unless fire_id is 'live'
+    incident = get_active_incident() if fire_id == "live" else DEMO_FIRE
+    
     cache_key = f"{fire_id}_{n_frames}"
     if cache_key in _replay_cache:
         return _replay_cache[cache_key]
@@ -177,14 +187,14 @@ async def replay(
             (f["frame"] for f in frames if f["alert_tier"] in ("warning", "emergency")), None
         )
         result = {
-            "fire_id": fire_id, "fire_name": DEMO_FIRE["name"],
+            "fire_id": fire_id, "fire_name": incident["name"],
             "total_frames": len(frames), "alert_frame": alert_frame,
             "frames": frames,
             "meta": {
-                "center_lat": DEMO_FIRE["center_lat"],
-                "center_lon": DEMO_FIRE["center_lon"],
-                "bbox":       DEMO_FIRE["bbox"],
-                "start_date": DEMO_FIRE["start_date"],
+                "center_lat": incident["center_lat"],
+                "center_lon": incident["center_lon"],
+                "bbox":       incident["bbox"],
+                "start_date": incident["start_date"],
             },
         }
         _replay_cache[cache_key] = result
@@ -200,32 +210,67 @@ _DEMO_COUNTIES = [
     {"county": "Butte County",   "lat": 39.70, "lon": -121.60, "fips": "06007"},
     {"county": "Lassen County",  "lat": 40.55, "lon": -120.60, "fips": "06035"},
     {"county": "Shasta County",  "lat": 40.80, "lon": -121.90, "fips": "06089"},
-    {"county": "Tehama County",  "lat": 40.10, "lon": -122.20, "fips": "06103"},
+    {"proxy_county": "Sonoma",   "lat": 38.30, "lon": -122.70, "fips": "06097"},
+    {"proxy_county": "Tehama",   "lat": 40.10, "lon": -122.20, "fips": "06103"},
 ]
+
+@app.get("/alert-history", tags=["Prediction"])
+async def alert_history():
+    try:
+        incident = get_active_incident()
+        df = _get_dataset()
+        
+        # Heuristic: Find frames where risk crossed 'warning' threshold (0.6)
+        alerts_df = df[df["risk_score"] >= 0.6].copy()
+        alerts_df = alerts_df.sort_values("timestamp", ascending=False).head(10)
+        
+        history = []
+        for _, row in alerts_df.iterrows():
+            history.append({
+                "timestamp": row["timestamp"].isoformat(),
+                "incident": incident["name"],
+                "risk_score": float(round(float(row["risk_score"]), 4)),
+                "fire_pixels": int(row["fire_pixels"]),
+                "temperature": float(row["temperature"]),
+                "alert_tier": "warning" if row["risk_score"] < 0.75 else "emergency"
+            })
+            
+        return {"history": history}
+    except Exception as e:
+        logger.error(f"/alert-history error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/alerts", tags=["Prediction"])
 async def alerts(region: str = Query(default="CA")):
     try:
-        df  = _get_dataset()
+        incident = get_active_incident()
+        
+        # If it's the demo fire, use the pre-built dataset
+        df = _get_dataset()
+            
         seq = df[LSTM_CONFIG["features"]].tail(LSTM_CONFIG["sequence_length"]).values.astype(np.float32)
         from ml.inference import predict_risk
         from api.geo import _get_alert_tier, _classify_risk
-        center_lat, center_lon = DEMO_FIRE["center_lat"], DEMO_FIRE["center_lon"]
+        center_lat, center_lon = incident["center_lat"], incident["center_lon"]
 
         county_alerts = []
         for c in _DEMO_COUNTIES:
+            name = c.get("county") or c.get("proxy_county")
             dist        = np.sqrt((c["lat"] - center_lat)**2 + (c["lon"] - center_lon)**2)
             attenuation = np.exp(-dist * 1.5)
             mod_seq     = seq.copy()
             mod_seq[:, 0] = seq[:, 0] * attenuation
             result = predict_risk(mod_seq)
-            county_alerts.append({**c, **result})
+            county_alerts.append({**c, "county": name, **result})
 
         county_alerts.sort(key=lambda x: x["risk_score"], reverse=True)
         active = [c for c in county_alerts if c["alert_tier"] != "none"]
 
         return {
             "region": region,
+            "incident": incident["name"],
+            "center": {"lat": center_lat, "lon": center_lon},
             "counties": county_alerts,
             "active_alerts": len(active),
             "highest_tier": county_alerts[0]["alert_tier"] if county_alerts else "none",

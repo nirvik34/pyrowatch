@@ -2,6 +2,9 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Landing from './pages/Landing'
 import Dashboard from './pages/Dashboard'
 
+import Replay from './pages/Replay'
+import Alerts from './pages/Alerts'
+
 // Placeholder pages — replace with real components in Phase 4
 const ComingSoon = ({ page }: { page: string }) => (
   <div className="bg-background-dark min-h-screen flex items-center justify-center">
@@ -22,8 +25,8 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/replay" element={<ComingSoon page="replay" />} />
-        <Route path="/alerts" element={<ComingSoon page="alerts" />} />
+        <Route path="/replay" element={<Replay />} />
+        <Route path="/alerts" element={<Alerts />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
